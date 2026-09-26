@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>设备预警看板 · 换电柜 / 电池</title>
+<script src="lib/echarts.min.js"></script>
+<!-- 单一真相源：由 sync_db.py 生成 window.TABLE_DATA，server 实时读盘 (无缓存) -->
+<script src="data.js"></script>
+<style>
+  :root{
+    --bg:#0b1426; --panel:#142039; --panel2:#0f1a31;
+    --border:#1f3158; --text:#e6edf6; --muted:#8aa0c5;
+    --p0:#ff4d4f; --p1:#fa8c16; --p2:#fadb14; --p9:#52c41a;
+    --ok:#52c41a; --accent:#1677ff;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;
+       background:linear-gradient(180deg,#0a1325 0%,#0b1426 100%);color:var(--text);min-height:100vh;}
+  header{display:flex;justify-content:space-between;align-items:center;padding:12px 24px;
+         background:var(--panel);border-bottom:1px solid var(--border);}
+  header h1{font-size:18px;margin:0;font-weight:600}
+  header .meta{font-size:12px;color:var(--muted);display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  nav{display:flex;gap:6px;padding:10px 24px 0;background:var(--panel);border-bottom:1px solid var(--border)}
+  nav button{background:transparent;border:1px solid var(--border);border-bottom:none;color:var(--muted);
+             padding:9px 18px;border-radius:9px 9px 0 0;cursor:pointer;font-size:14px;font-weight:600}
+  nav button.active{background:var(--panel2);color:var(--text);border-color:var(--accent)}
+  .tab{display:none;padding:16px 24px}
+  .tab.active{display:block}
+  .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:14px}
+  .kpi{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:14px;}
+  .kpi .lbl{font-size:12px;color:var(--muted)}
+  .kpi .num{font-size:30px;font-weight:700;margin-top:4px}
+  .kpi.p0 .num{color:var(--p0)} .kpi.p1 .num{color:var(--p1)}
+  .kpi.p2 .num{color:var(--p2)} .kpi.p9 .num{color:var(--p9)} .kpi.ok .num{color:var(--ok)}
+  .kpi .src{font-size:10px;color:var(--muted);margin-top:4px}
+  .panel{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:14px;margin-bottom:14px}
+  .panel h3{margin:0 0 8px;font-size:14px;font-weight:600;display:flex;justify-content:space-between;align-items:center}
+  .panel h3 .pill{font-size:11px;background:var(--p0);color:#fff;padding:2px 8px;border-radius:10px}
+  table{width:100%;border-collapse:collapse;font-size:12px;}
+  th,td{padding:6px 8px;text-align:left;border-bottom:1px solid var(--border);}
+  th{color:var(--muted);font-weight:500;background:var(--panel2);position:sticky;top:0;white-space:nowrap}
+  tr:hover td{background:rgba(255,255,255,0.03)}
+  .badge{display:inline-block;padding:1px 8px;border-radius:8px;font-size:11px;font-weight:600;}
+  .badge.p0{background:var(--p0);color:#fff} .badge.p1{background:var(--p1);color:#fff}
+  .badge.p2{background:var(--p2);color:#000} .badge.p9{background:var(--p9);color:#000}
+  .badge.cab{background:#1677ff;color:#fff}
+  .badge.pending{background:#722ed1;color:#fff}
+  .scroll{max-height:480px;overflow:auto}
+  button.btn{background:#1677ff;border:none;color:#fff;padding:4px 10px;border-radius:6px;cursor:pointer;font-size:12px}
+  button.btn:hover{background:#4096ff}
+  .toolbar{display:flex;gap:8px;margin-bottom:8px;align-items:center;font-size:12px;flex-wrap:wrap}
+  .toolbar input{background:var(--panel2);border:1px solid var(--border);color:var(--text);
+                 padding:4px 8px;border-radius:6px;font-size:12px;width:160px}
+  .toolbar select{background:var(--panel2);color:var(--text);border:1px solid var(--border);
+                  padding:4px 8px;border-radius:6px;font-size:12px;cursor:pointer}
+  .toolbar label{color:var(--muted);font-size:11px;margin-right:-4px}
+  .legend{display:flex;gap:10px;font-size:11px;color:var(--muted);margin-bottom:6px;flex-wrap:wrap}
+  .legend span{display:inline-flex;align-items:center;gap:4px}
+  .legend i{width:10px;height:10px;border-radius:2px;display:inline-block}
+  footer{padding:10px 24px;color:var(--muted);font-size:12px;text-align:center;border-top:1px solid var(--border)}
+  .toast{position:fixed;top:20px;right:20px;background:var(--p0);color:#fff;
+         padding:8px 14px;border-radius:6px;font-size:12px;opacity:0;transition:opacity .3s;z-index:9999}
+  .toast.show{opacity:1}
+  .disc{background:var(--panel2);border:1px dashed var(--border);border-radius:8px;
+        padding:12px;font-size:12px;color:var(--muted);line-height:1.8}
+  .disc b{color:#ffd666}
+  .disc code{background:#06101f;color:#7ee787;padding:1px 5px;border-radius:4px}
+  details{margin-top:6px} summary{cursor:pointer;color:#69b1ff;font-size:12px}
+  .empty{padding:24px;text-align:center;color:var(--muted)}
+  .two-col{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  @media(max-width:900px){.two-col{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<header>
+  <h1>⚡ 设备预警看板 · 换电柜 / 电池</h1>
+  <div class="meta">
+    <span>数据源: <b id="src">本地 data.json</b></span> ·
+    <span id="ts">--</span> ·
+    <button class="btn" onclick="reload()">🔄 刷新</button>
+    <button class="btn" onclick="pasteJson()">📋 粘贴 JSON</button>
+    <button class="btn" onclick="downloadData()">💾 下载</button>
+    <button class="btn" onclick="downloadHtml()">📦 导出</button>
+  </div>
+</header>
+
+<nav>
+  <button id="tab-battery-btn" class="active" onclick="switchTab('battery')">🔋 电池预警</button>
+  <button id="tab-cabinet-btn" onclick="switchTab('cabinet')">🏢 换电柜预警</button>
+  <button id="tab-discover-btn" onclick="switchTab('discover')">🔎 真实字段速查</button>
+</nav>
+
+<!-- ================= 电池菜单 ================= -->
+<section class="tab active" id="tab-battery">
+  <div class="kpis">
+    <div class="kpi p0"><div class="lbl">🔴 P0 无法识别</div><div class="num" id="k-b-p0">--</div><div class="src">最优先</div></div>
+    <div class="kpi p1"><div class="lbl">🟠 P1 断充</div><div class="num" id="k-b-p1">--</div><div class="src">有电压但异常</div></div>
+    <div class="kpi p2"><div class="lbl">🟡 P2 饿死</div><div class="num" id="k-b-p2">--</div><div class="src">电压耗尽</div></div>
+    <div class="kpi pending"><div class="lbl">🟣 待分类</div><div class="num" id="k-b-u">--</div><div class="src">需校准关键词</div></div>
+    <div class="kpi ok"><div class="lbl">📊 电池总数</div><div class="num" id="k-b-t">--</div><div class="src">含正常</div></div>
+  </div>
+
+  <div class="panel">
+    <h3>🔋 电池告警明细（按 P0>P1>P2 排序）<span><span class="pill" id="bat-count">0</span></span></h3>
+    <div class="legend">
+      <span><i style="background:var(--p0)"></i>P0 无法识别</span>
+      <span><i style="background:var(--p1)"></i>P1 断充</span>
+      <span><i style="background:var(--p2)"></i>P2 饿死</span>
+      <span><i style="background:#722ed1"></i>待分类</span>
+    </div>
+    <div class="toolbar" id="bat-toolbar">
+      <input id="bat-q" placeholder="🔍 任意字段值" oninput="renderBattery()">
+      <select id="bat-pri" onchange="renderBattery()">
+        <option value="">全部优先级</option>
+        <option value="0">P0 仅无法识别</option>
+        <option value="1">P1 仅断充</option>
+        <option value="2">P2 仅饿死</option>
+        <option value="9">待分类</option>
+      </select>
+      <!-- 筛选维度由 JS 注入 -->
+    </div>
+    <div class="scroll">
+      <table id="bat-tbl"><thead><tr id="bat-head"></tr></thead><tbody id="bat-body"></tbody></table>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h3>📊 电池告警分布</h3>
+    <div id="chart-bat" style="height:280px"></div>
+  </div>
+</section>
+
+<!-- ================= 机柜菜单 ================= -->
+<section class="tab" id="tab-cabinet">
+  <div class="kpis">
+    <div class="kpi p0"><div class="lbl">🚨 烟感告警</div><div class="num" id="k-c-smoke">--</div><div class="src">P0 · 安全</div></div>
+    <div class="kpi p0"><div class="lbl">💧 水浸告警</div><div class="num" id="k-c-water">--</div><div class="src">P0 · 安全</div></div>
+    <div class="kpi p2"><div class="lbl">📦 仓位告警</div><div class="num" id="k-c-slot">--</div><div class="src">P2</div></div>
+    <div class="kpi p1"><div class="lbl">🌡 温度告警</div><div class="num" id="k-c-temp">--</div><div class="src">P1</div></div>
+    <div class="kpi p1"><div class="lbl">🔌 机柜离线</div><div class="num" id="k-c-off">--</div><div class="src">online=no_connected</div></div>
+    <div class="kpi p1"><div class="lbl">⚠️ 机柜弃用</div><div class="num" id="k-c-ab">--</div><div class="src">abandon_reason</div></div>
+    <div class="kpi ok"><div class="lbl">✅ 正常</div><div class="num" id="k-c-ok">--</div><div class="src">无告警</div></div>
+    <div class="kpi ok"><div class="lbl">📊 机柜总数</div><div class="num" id="k-c-t">--</div><div class="src">含正常</div></div>
+  </div>
+
+  <div class="panel">
+    <h3>🏢 换电柜明细（烟感/水浸/仓位/离线/弃用）<span><span class="pill" style="background:#1677ff" id="cab-count">0</span></span></h3>
+    <div class="toolbar" id="cab-toolbar">
+      <input id="cab-q" placeholder="🔍 任意字段值" oninput="renderCabinet()">
+      <select id="cab-typ" onchange="renderCabinet()">
+        <option value="">全部</option>
+        <option value="烟感告警">🚨 烟感</option>
+        <option value="水浸告警">💧 水浸</option>
+        <option value="仓位告警">📦 仓位</option>
+        <option value="温度告警">🌡 温度</option>
+        <option value="机柜离线">🔌 机柜离线</option>
+        <option value="机柜弃用">⚠️ 机柜弃用</option>
+        <option value="正常">✅ 正常</option>
+      </select>
+      <!-- 筛选维度由 JS 注入 -->
+    </div>
+    <div class="scroll">
+      <table id="cab-tbl"><thead><tr id="cab-head"></tr></thead><tbody id="cab-body"></tbody></table>
+    </div>
+  </div>
+</section>
+
+<!-- ================= 真实字段速查 ================= -->
+<section class="tab" id="tab-discover">
+  <div class="panel">
+    <h3>🔎 真实字段速查（校准 P0/P1/P2 与告警关键词）</h3>
+    <div id="discover-box" class="disc">加载中…</div>
+  </div>
+</section>
+
+<footer>⚡ 本地优先模式 · 真相源 data.js（由 sync/sync_db.py 写入）· 每 30 秒自动重读 · 硬刷新 Ctrl+Shift+R 立即更新</footer>
+<div class="toast" id="toast"></div>
+
+<script>
+const PRIS = {0:"P0",1:"P1",2:"P2",9:"待分类"};
+const CLS  = {0:"p0",1:"p1",2:"p2",9:"pending"};
+let _bat=[], _cab=[], _kpi={}, _discover={}, _filterOpts={}, _meta={};
+let chartBat, chartCab;
+
+function esc(s){ return (s==null?"":String(s)).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
+function fmt(v){ if(v==null||v==="") return "-"; return v; }
+function toast(msg,color){ const t=document.getElementById("toast"); t.textContent=msg; t.style.background=color||"#1677ff"; t.classList.add("show"); setTimeout(()=>t.classList.remove("show"),2500); }
+
+const BAT_PREF = ["battery_sn","scheme_version","online_status","power","belong_name","site_name","city","area","street","agency_name","_event_name","create_time","update_time"];
+const CAB_PREF = ["control_no","_model","online_status","device_status","soc","abandon_reason","last_location_address","supplier_name","sim_status","creator_name","update_time"];
+const INTERNAL = new Set(["_p","_reason","_etype","_alert","_no","_name","_model","_alarms","_alert_list","_event_name"]);
+
+function pickCols(rows, pref){
+  const present=new Set();
+  for(const r of rows) for(const k of Object.keys(r)) if(!INTERNAL.has(k) && !String(k).startsWith("_")) present.add(k);
+  const ordered=pref.filter(c=>present.has(c));
+  for(const c of present) if(!ordered.includes(c)) ordered.push(c);
+  return ordered.slice(0,14);
+}
+
+// 筛选维度（来自 data.json.filter_options）
+const FILTER_DEFS = [
+  { key:"product",   label:"📱 产品",     target:"both" },
+  { key:"city",      label:"🏙 城市",      target:"bat"  },
+  { key:"area",      label:"📍 区域",      target:"bat"  },
+  { key:"street",    label:"🛣 街道",      target:"bat"  },
+  { key:"community", label:"🏘 社区",      target:"both" },
+  { key:"agent",     label:"🤝 代理商",    target:"both" },
+];
+
+function buildFilterSelects(){
+  const bopts=_filterOpts.battery||{}, copts=_filterOpts.cabinet||{};
+  document.querySelectorAll("select[id^='bat-dim-'], select[id^='cab-dim-']").forEach(el=>el.remove());
+  FILTER_DEFS.forEach(def=>{
+    if(def.target==="bat"||def.target==="both"){
+      const v=(bopts[def.key]||[]); if(v.length) addSelect("bat-toolbar","bat-dim-"+def.key,def.label,v);
+    }
+    if(def.target==="cab"||def.target==="both"){
+      const v=(copts[def.key]||[]); if(v.length) addSelect("cab-toolbar","cab-dim-"+def.key,def.label,v);
+    }
+  });
+}
+function addSelect(hostId,id,label,vals){
+  const host=document.getElementById(hostId);
+  const wrap=document.createElement("label"); wrap.style.marginRight="4px"; wrap.textContent=label+":";
+  const sel=document.createElement("select"); sel.id=id; sel.dataset.dim=id.split("-dim-")[1];
+  sel.onchange=(id.startsWith("bat-")?renderBattery:renderCabinet);
+  sel.innerHTML=`<option value="">全部</option>`+vals.map(v=>`<option>${esc(v)}</option>`).join("");
+  host.appendChild(wrap); host.appendChild(sel);
+}
+function getFilterValues(prefix){
+  const out={};
+  document.querySelectorAll(`select[id^='${prefix}-dim-']`).forEach(s=>{ if(s.value) out[s.dataset.dim]=s.value; });
+  return out;
+}
+function matchDim(rec,dimKey,val){
+  if(!val) return true;
+  const v=rec[dimKey];
+  return v!==undefined && String(v)===val;
+}
+
+// 真相源：data.js 提供的 window.TABLE_DATA（由 sync_db.py 生成，server 实时读盘）
+function loadFromGlobal(){
+  const d=window.TABLE_DATA;
+  if(d && (d.battery||d.cabinet||d.kpi)){ applyData(d); return true; }
+  return false;
+}
+function showFallback(){
+  _kpi={};_bat=[];_cab=[];_discover={};_filterOpts={}; renderAll();
+  toast("⚠ 暂无数据，请先跑 sync 连数据库同步","#fa8c16");
+}
+function renderAll(){ renderKpi(); renderBattery(); renderCabinet(); renderDiscover(); renderChartBat(); }
+// 重新拉取 data.js（带时间戳防缓存，配合 server 无缓存实现实时刷新）
+function refresh(rerender){
+  const s=document.createElement("script");
+  s.src="data.js?t="+Date.now();
+  s.onload=()=>{ if(loadFromGlobal()){ if(rerender) renderAll(); } else if(!window.TABLE_DATA) showFallback(); };
+  s.onerror=()=>{ if(!window.TABLE_DATA) showFallback(); };
+  document.head.appendChild(s);
+}
+function applyData(d){
+  _kpi=d.kpi||{}; _bat=d.battery||[]; _cab=d.cabinet||[];
+  _discover=d.discover||{}; _filterOpts=d.filter_options||{}; _meta=d.meta||{};
+  buildFilterSelects();
+}
+
+function renderKpi(){
+  const b=_kpi.battery||{}, c=_kpi.cabinet||{};
+  document.getElementById("k-b-p0").textContent=b.p0||0;
+  document.getElementById("k-b-p1").textContent=b.p1||0;
+  document.getElementById("k-b-p2").textContent=b.p2||0;
+  document.getElementById("k-b-u").textContent=b.unclassified||0;
+  document.getElementById("k-b-t").textContent=b.total||0;
+  document.getElementById("k-c-smoke").textContent=c.smoke||0;
+  document.getElementById("k-c-water").textContent=c.water||0;
+  document.getElementById("k-c-slot").textContent=c.slot||0;
+  document.getElementById("k-c-temp").textContent=c.temp||0;
+  document.getElementById("k-c-off").textContent=c.offline||0;
+  document.getElementById("k-c-ab").textContent=c.abandon||0;
+  document.getElementById("k-c-ok").textContent=c.normal||0;
+  document.getElementById("k-c-t").textContent=c.total||0;
+  document.getElementById("ts").textContent="最后同步 "+(_kpi.fetched_at||"--");
+}
+
+function renderBattery(){
+  const q=document.getElementById("bat-q").value.toLowerCase();
+  const p=document.getElementById("bat-pri").value;
+  const filters=getFilterValues("bat");
+  const cols=pickCols(_bat,BAT_PREF);
+  document.getElementById("bat-head").innerHTML=
+    `<th style="width:56px">优先级</th>`+cols.map(c=>`<th>${esc(c)}</th>`).join("")+`<th>原因/归类</th>`;
+  const rows=_bat.filter(b=>{
+    if(p!=="" && String(b._p)!==p) return false;
+    for(const [k,v] of Object.entries(filters)) if(!matchDim(b,k,v)) return false;
+    if(!q) return true;
+    return Object.values(b).some(vv=>(vv??"").toString().toLowerCase().includes(q));
+  }).sort((a,b)=>(a._p??9)-(b._p??9));
+  document.getElementById("bat-count").textContent=rows.length;
+  document.getElementById("bat-body").innerHTML=rows.map(b=>{
+    const pr=b._p??2;
+    const cells=cols.map(c=>`<td title="${esc(b[c])}">${esc(fmt(b[c]))}</td>`).join("");
+    return `<tr><td><span class="badge ${CLS[pr]}">${PRIS[pr]||"P?"}</span></td>${cells}<td title="${esc(b._reason)}" style="max-width:220px">${esc(b._reason||"-")}</td></tr>`;
+  }).join("")||`<tr><td colspan="${cols.length+2}" class="empty">暂无电池告警 🎉</td></tr>`;
+}
+
+function renderCabinet(){
+  const q=document.getElementById("cab-q").value.toLowerCase();
+  const typ=document.getElementById("cab-typ").value;
+  const filters=getFilterValues("cab");
+  const cols=pickCols(_cab,CAB_PREF);
+  document.getElementById("cab-head").innerHTML=
+    `<th style="width:90px">告警类型</th>`+cols.map(c=>`<th>${esc(c)}</th>`).join("")+`<th>明细</th>`;
+  const rows=_cab.filter(c=>{
+    if(typ && c._alert!==typ) return false;
+    for(const [k,v] of Object.entries(filters)) if(!matchDim(c,k,v)) return false;
+    if(!q) return true;
+    return Object.values(c).some(vv=>(vv??"").toString().toLowerCase().includes(q));
+  });
+  document.getElementById("cab-count").textContent=rows.length;
+  document.getElementById("cab-body").innerHTML=rows.map(c=>{
+    const pr=c._p??9, alert=c._alert||"正常";
+    const cells=cols.map(col=>`<td title="${esc(c[col])}">${esc(fmt(c[col]))}</td>`).join("");
+    return `<tr><td><span class="badge ${pr===9?'cab':CLS[pr]}">${esc(alert)}</span></td>${cells}<td>${esc(c._reason||"-")}</td></tr>`;
+  }).join("")||`<tr><td colspan="${cols.length+2}" class="empty">暂无机柜记录</td></tr>`;
+}
+
+function renderDiscover(){
+  const box=document.getElementById("discover-box");
+  const d=_discover;
+  const et=Object.entries(d.event_name_dist||{}).sort((a,b)=>b[1]-a[1])
+    .map(([k,v])=>`<code>${esc(k)}</code>: ${v}`).join(" ｜ ")||"（无，请先跑 sync 拉事件表）";
+  const cols=(d.battery_columns||[]).join(", ");
+  const ccols=(d.cabinet_columns||[]).join(", ");
+  const ecols=(d.event_columns||[]).join(", ");
+  const dicts=(d.dict_tables||[]).join(", ")||"（无）";
+  box.innerHTML=
+    `<b>电池表</b>: <code>${esc(d.battery_table||"?")}</code><br>`+
+    `<b>机柜表</b>: <code>${esc(d.cabinet_table||"?")}</code> （无烟感/水浸/仓位字段，告警来自事件表）<br>`+
+    `<b>事件表</b>: <code>${esc(d.event_table||"?")}</code><br><br>`+
+    `<b>事件 event_name 真实取值分布</b>（用于校准 P0/P1/P2 与烟感/水浸/仓位关键词）:<br>${et}<br><br>`+
+    `<b>电池表字段</b>: ${cols}<br>`+
+    `<b>机柜表字段</b>: ${ccols}<br>`+
+    `<b>事件表字段</b>: ${ecols}<br><br>`+
+    `<b>字典 join 源</b>: ${dicts}<br>`+
+    `<details><summary>如何校准？</summary>`+
+    `把上方 <code>event_name</code> 真实取值告诉我（例如 “断充=charge_break / 无法识别=no_identify / 饿死=low_voltage / 烟感=smoke_alarm”），`+
+    `我写进 <code>db_config.json</code> 的 classify 后即自动归位。也可把“换电柜明细_筛选.csv”的表头+3 行样例贴我，确认机柜明细列。</details>`;
+}
+
+function renderChartBat(){
+  if(!chartBat) chartBat=echarts.init(document.getElementById("chart-bat"));
+  const b=_kpi.battery||{};
+  chartBat.setOption({
+    backgroundColor:"transparent", tooltip:{trigger:"item"},
+    legend:{textStyle:{color:"#8aa0c5"},bottom:0},
+    series:[{ type:"pie",radius:["38%","68%"],center:["50%","45%"],
+      label:{color:"#e6edf6",formatter:"{b}\n{c}"},
+      data:[
+        {name:"无法识别 P0",value:b.p0||0,itemStyle:{color:"#ff4d4f"}},
+        {name:"断充 P1",    value:b.p1||0,itemStyle:{color:"#fa8c16"}},
+        {name:"饿死 P2",    value:b.p2||0,itemStyle:{color:"#fadb14"}},
+        {name:"待分类",      value:b.unclassified||0,itemStyle:{color:"#722ed1"}},
+      ]}]
+  });
+}
+
+function switchTab(name){
+  ["battery","cabinet","discover"].forEach(t=>{
+    document.getElementById("tab-"+t).classList.toggle("active", t===name);
+    document.getElementById("tab-"+t+"-btn").classList.toggle("active", t===name);
+  });
+  if(name==="battery") setTimeout(()=>chartBat&&chartBat.resize(),30);
+}
+
+// 手动刷新按钮
+function reload(){ refresh(true); }
+function downloadData(){
+  try{
+    const blob=new Blob([JSON.stringify(window.TABLE_DATA||{},null,2)],{type:"application/json;charset=utf-8"});
+    const a=document.createElement("a"); a.href=URL.createObjectURL(blob); a.download="data.json"; a.click();
+    toast("✅ data.json 已下载","#52c41a");
+  }catch(e){ toast("❌ "+e.message,"#ff4d4f"); }
+}
+function pasteJson(){
+  const txt=prompt("把 sync_db.py 生成的 data.json 内容粘贴到这里:");
+  if(!txt) return;
+  try{ applyData(JSON.parse(txt)); renderKpi();renderBattery();renderCabinet();renderDiscover();renderChartBat();
+    toast("✅ 真实数据已加载","#52c41a"); }catch(e){ toast("❌ JSON 解析失败","#ff4d4f"); }
+}
+function downloadHtml(){
+  const html=document.documentElement.outerHTML;
+  const blob=new Blob([html],{type:"text/html"});
+  const a=document.createElement("a"); a.href=URL.createObjectURL(blob); a.download="dudu-dashboard-"+Date.now()+".html"; a.click();
+}
+window.addEventListener("resize",()=>{chartBat&&chartBat.resize();chartCab&&chartCab.resize();});
+// 首次：data.js 已由 <head> 同步加载，直接渲染；随后再拉一次最新
+if(loadFromGlobal()){ renderAll(); } else { showFallback(); }
+refresh(false);
+// 每 30 秒重新拉取 data.js（server 无缓存 + 时间戳防缓存）→ 实时刷新看板
+setInterval(()=>refresh(true),30000);
+</script>
+</body>
+</html>
